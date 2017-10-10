@@ -189,6 +189,21 @@ public interface IgniteCacheOffheapManager {
         throws IgniteCheckedException;
 
     /**
+     * @param entry Entry.
+     * @param val Value.
+     * @param ver Version.
+     * @param mvccVer Mvcc update version.
+     * @return {@code True} if value was inserted.
+     * @throws IgniteCheckedException If failed.
+     */
+    public boolean mvccInitialValue(
+        GridCacheMapEntry entry,
+        @Nullable CacheObject val,
+        GridCacheVersion ver,
+        MvccCoordinatorVersion mvccVer
+    ) throws IgniteCheckedException;
+
+    /**
      * @param primary {@code True} if on primary node.
      * @param entry Entry.
      * @param val Value.
@@ -220,18 +235,10 @@ public interface IgniteCacheOffheapManager {
 
     /**
      * @param entry Entry.
-     * @param val Value.
-     * @param ver Version.
-     * @param mvccVer Mvcc update version.
-     * @return {@code True} if value was inserted.
      * @throws IgniteCheckedException If failed.
      */
-    public boolean mvccInitialValue(
-        GridCacheMapEntry entry,
-        @Nullable CacheObject val,
-        GridCacheVersion ver,
-        MvccCoordinatorVersion mvccVer
-    ) throws IgniteCheckedException;
+    public void mvccRemoveAll(GridCacheMapEntry entry)
+        throws IgniteCheckedException;
 
     /**
      * @param cctx Cache context.
@@ -542,6 +549,7 @@ public interface IgniteCacheOffheapManager {
 
         /**
          * @param cctx Cache context.
+         * @param primary {@code True} if update is executed on primary node.
          * @param key Key.
          * @param val Value.
          * @param ver Version.
@@ -557,11 +565,26 @@ public interface IgniteCacheOffheapManager {
             GridCacheVersion ver,
             MvccCoordinatorVersion mvccVer) throws IgniteCheckedException;
 
+        /**
+         * @param cctx Cache context.
+         * @param primary {@code True} if update is executed on primary node.
+         * @param key Key.
+         * @param mvccVer Mvcc version.
+         * @return List of transactions to wait for.
+         * @throws IgniteCheckedException If failed.
+         */
         @Nullable GridLongList mvccRemove(
             GridCacheContext cctx,
             boolean primary,
             KeyCacheObject key,
             MvccCoordinatorVersion mvccVer) throws IgniteCheckedException;
+
+        /**
+         * @param cctx Cache context.
+         * @param key Key.
+         * @throws IgniteCheckedException If failed.
+         */
+        void mvccRemoveAll(GridCacheContext cctx, KeyCacheObject key) throws IgniteCheckedException;
 
         /**
          * @param cctx Cache context.

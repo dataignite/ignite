@@ -416,12 +416,16 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
         boolean primary,
         GridCacheMapEntry entry,
         MvccCoordinatorVersion mvccVer
-    )
-        throws IgniteCheckedException {
+    ) throws IgniteCheckedException {
         return dataStore(entry.localPartition()).mvccRemove(entry.context(),
             primary,
             entry.key(),
             mvccVer);
+    }
+
+    /** {@inheritDoc} */
+    @Override public void mvccRemoveAll(GridCacheMapEntry entry) throws IgniteCheckedException {
+        dataStore(entry.localPartition()).mvccRemoveAll(entry.context(), entry.key());
     }
 
     /** {@inheritDoc} */
@@ -1555,6 +1559,30 @@ public class IgniteCacheOffheapManagerImpl implements IgniteCacheOffheapManager 
             }
             finally {
                 busyLock.leaveBusy();
+            }
+        }
+
+        /** {@inheritDoc} */
+        @Override public void mvccRemoveAll(GridCacheContext cctx, KeyCacheObject key) throws IgniteCheckedException {
+            key.valueBytes(cctx.cacheObjectContext());
+
+            int cacheId = grp.sharedGroup() ? cctx.cacheId() : CU.UNDEFINED_CACHE_ID;
+
+            GridCursor<CacheDataRow> cur = dataTree.find(
+                new MvccSearchRow(cacheId, key, Long.MAX_VALUE, Long.MAX_VALUE),
+                new MvccSearchRow(cacheId, key, 1, 1),
+                CacheDataRowAdapter.RowData.KEY_ONLY);
+
+            while (cur.next()) {
+                CacheDataRow row = cur.get();
+
+                assert row.link() != 0;
+
+                boolean rmvd = dataTree.removex(row);
+
+                assert rmvd;
+
+                rowStore.removeRow(row.link());
             }
         }
 

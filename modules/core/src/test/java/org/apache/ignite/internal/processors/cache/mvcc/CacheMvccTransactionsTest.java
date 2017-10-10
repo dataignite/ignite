@@ -1296,42 +1296,49 @@ public class CacheMvccTransactionsTest extends GridCommonAbstractTest {
      * @throws Exception If failed.
      */
     public void testAccountsTxGetAll_SingleNode() throws Exception {
-        accountsTxGetAll(1, 0, 0, 64, ReadMode.GET_ALL);
+        accountsTxGetAll(1, 0, 0, 64, false, ReadMode.GET_ALL);
     }
 
     /**
      * @throws Exception If failed.
      */
     public void testAccountsTxGetAll_SingleNode_SinglePartition() throws Exception {
-        accountsTxGetAll(1, 0, 0, 1, ReadMode.GET_ALL);
+        accountsTxGetAll(1, 0, 0, 1, false, ReadMode.GET_ALL);
+    }
+
+    /**
+     * @throws Exception If failed.
+     */
+    public void testAccountsTxGetAll_WithRemoves_SingleNode_SinglePartition() throws Exception {
+        accountsTxGetAll(1, 0, 0, 1, true, ReadMode.GET_ALL);
     }
 
     /**
      * @throws Exception If failed.
      */
     public void testAccountsTxGetAll_ClientServer_Backups0() throws Exception {
-        accountsTxGetAll(4, 2, 0, 64, ReadMode.GET_ALL);
+        accountsTxGetAll(4, 2, 0, 64, false, ReadMode.GET_ALL);
     }
 
     /**
      * @throws Exception If failed.
      */
     public void testAccountsTxGetAll_ClientServer_Backups1() throws Exception {
-        accountsTxGetAll(4, 2, 1, 64, ReadMode.GET_ALL);
+        accountsTxGetAll(4, 2, 1, 64, false, ReadMode.GET_ALL);
     }
 
     /**
      * @throws Exception If failed.
      */
     public void testAccountsTxGetAll_ClientServer_Backups2() throws Exception {
-        accountsTxGetAll(4, 2, 2, 64, ReadMode.GET_ALL);
+        accountsTxGetAll(4, 2, 2, 64, false, ReadMode.GET_ALL);
     }
 
     /**
      * @throws Exception If failed.
      */
     public void testAccountsTxScan_SingleNode_SinglePartition() throws Exception {
-        accountsTxGetAll(1, 0, 0, 1, ReadMode.SCAN);
+        accountsTxGetAll(1, 0, 0, 1, false, ReadMode.SCAN);
     }
 
     /**
@@ -1339,6 +1346,7 @@ public class CacheMvccTransactionsTest extends GridCommonAbstractTest {
      * @param clients Number of client nodes.
      * @param cacheBackups Number of cache backups.
      * @param cacheParts Number of cache partitions.
+     * @param withRmvs If {@code true} then in addition to puts tests also executes removes.
      * @param readMode Read mode.
      * @throws Exception If failed.
      */
@@ -1347,6 +1355,7 @@ public class CacheMvccTransactionsTest extends GridCommonAbstractTest {
         final int clients,
         int cacheBackups,
         int cacheParts,
+        final boolean withRmvs,
         final ReadMode readMode
     )
         throws Exception
@@ -1376,6 +1385,8 @@ public class CacheMvccTransactionsTest extends GridCommonAbstractTest {
             }
         };
 
+        final Set<Integer> rmvdIds = new HashSet<>();
+
         GridInClosure3<Integer, List<IgniteCache>, AtomicBoolean> writer =
             new GridInClosure3<Integer, List<IgniteCache>, AtomicBoolean>() {
                 @Override public void apply(Integer idx, List<IgniteCache> caches, AtomicBoolean stop) {
@@ -1400,8 +1411,8 @@ public class CacheMvccTransactionsTest extends GridCommonAbstractTest {
                         keys.add(id1);
                         keys.add(id2);
 
-                        Integer cntr1;
-                        Integer cntr2;
+                        Integer cntr1 = null;
+                        Integer cntr2 = null;
 
                         try (Transaction tx = txs.txStart(PESSIMISTIC, REPEATABLE_READ)) {
                             MvccTestAccount a1;
@@ -1412,28 +1423,74 @@ public class CacheMvccTransactionsTest extends GridCommonAbstractTest {
                             a1 = accounts.get(id1);
                             a2 = accounts.get(id2);
 
-                            assertNotNull(a1);
-                            assertNotNull(a2);
+                            if (!withRmvs) {
+                                assertNotNull(a1);
+                                assertNotNull(a2);
 
-                            cntr1 = a1.updateCnt + 1;
-                            cntr2 = a2.updateCnt + 1;
+                                cntr1 = a1.updateCnt + 1;
+                                cntr2 = a2.updateCnt + 1;
 
-                            cache.put(id1, new MvccTestAccount(a1.val + 1, cntr1));
-                            cache.put(id2, new MvccTestAccount(a2.val - 1, cntr2));
+                                cache.put(id1, new MvccTestAccount(a1.val + 1, cntr1));
+                                cache.put(id2, new MvccTestAccount(a2.val - 1, cntr2));
+                            }
+                            else {
+                                if (a1 != null || a2 != null) {
+                                    if (a1 != null && a2 != null) {
+                                        Integer rmvd = null;
+
+                                        if (rnd.nextInt(10) == 0) {
+                                            synchronized (rmvdIds) {
+                                                if (rmvdIds.size() < 10) {
+                                                    rmvd = rnd.nextBoolean() ? id1 : id2;
+
+                                                    assertTrue(rmvdIds.add(rmvd));
+                                                }
+                                            }
+                                        }
+
+                                        if (rmvd != null) {
+                                            cache.remove(rmvd);
+
+                                            cache.put(rmvd.equals(id1) ? id2 : id1,
+                                                new MvccTestAccount(a1.val + a2.val, 1));
+                                        }
+                                        else {
+                                            cache.put(id1, new MvccTestAccount(a1.val + 1, 1));
+                                            cache.put(id2, new MvccTestAccount(a2.val - 1, 1));
+                                        }
+                                    }
+                                    else {
+                                        if (a1 == null) {
+                                            cache.put(id1, new MvccTestAccount(100, 1));
+                                            cache.put(id2, new MvccTestAccount(a2.val - 100, 1));
+
+                                            assertTrue(rmvdIds.remove(id1));
+                                        }
+                                        else {
+                                            cache.put(id1, new MvccTestAccount(a1.val - 100, 1));
+                                            cache.put(id2, new MvccTestAccount(100, 1));
+
+                                            assertTrue(rmvdIds.remove(id2));
+                                        }
+                                    }
+                                }
+                            }
 
                             tx.commit();
                         }
 
-                        Map<Integer, MvccTestAccount> accounts = cache.getAll(keys);
+                        if (!withRmvs) {
+                            Map<Integer, MvccTestAccount> accounts = cache.getAll(keys);
 
-                        MvccTestAccount a1 = accounts.get(id1);
-                        MvccTestAccount a2 = accounts.get(id2);
+                            MvccTestAccount a1 = accounts.get(id1);
+                            MvccTestAccount a2 = accounts.get(id2);
 
-                        assertNotNull(a1);
-                        assertNotNull(a2);
+                            assertNotNull(a1);
+                            assertNotNull(a2);
 
-                        assertTrue(a1.updateCnt >= cntr1);
-                        assertTrue(a2.updateCnt >= cntr2);
+                            assertTrue(a1.updateCnt >= cntr1);
+                            assertTrue(a2.updateCnt >= cntr2);
+                        }
                     }
 
                     info("Writer finished, updates: " + cnt);
@@ -1469,23 +1526,26 @@ public class CacheMvccTransactionsTest extends GridCommonAbstractTest {
                         else
                             accounts = cache.getAll(keys);
 
-                        assertEquals(ACCOUNTS, accounts.size());
+                        if (!withRmvs)
+                            assertEquals(ACCOUNTS, accounts.size());
 
                         int sum = 0;
 
                         for (int i = 0; i < ACCOUNTS; i++) {
                             MvccTestAccount account = accounts.get(i);
 
-                            assertNotNull(account);
+                            if (account != null) {
+                                sum += account.val;
 
-                            sum += account.val;
+                                Integer cntr = lastUpdateCntrs.get(i);
 
-                            Integer cntr = lastUpdateCntrs.get(i);
+                                if (cntr != null)
+                                    assertTrue(cntr <= account.updateCnt);
 
-                            if (cntr != null)
-                                assertTrue(cntr <= account.updateCnt);
-
-                            lastUpdateCntrs.put(i, cntr);
+                                lastUpdateCntrs.put(i, cntr);
+                            }
+                            else
+                                assertTrue(withRmvs);
                         }
 
                         assertEquals(ACCOUNTS * ACCOUNT_START_VAL, sum);
@@ -1501,9 +1561,12 @@ public class CacheMvccTransactionsTest extends GridCommonAbstractTest {
                         for (int i = 0; i < ACCOUNTS; i++) {
                             MvccTestAccount account = accounts.get(i);
 
-                            info("Account [id=" + i + ", val=" + account.val + ']');
+                            assertTrue(account != null || withRmvs);
 
-                            sum += account.val;
+                            info("Account [id=" + i + ", val=" + (account != null ? account.val : null) + ']');
+
+                            if (account != null)
+                                sum += account.val;
                         }
 
                         info("Sum: " + sum);
